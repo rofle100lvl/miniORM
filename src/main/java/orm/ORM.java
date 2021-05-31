@@ -46,41 +46,55 @@ public class ORM<T> {
         addInstructionsForType(char.class, string -> string.charAt(0), "CHARACTER [1]");
     }
 
+    private String createRequestToDB;
+    private String insertRequestToDb;
+
     public ORM(DataSource dataSource, Class<T> clazz)
             throws NoTableAnnotationException {
         this.clazz = clazz;
         this.dataSource = dataSource;
 
         if (Objects.isNull(clazz.getAnnotation(Table.class))) throw new NoTableAnnotationException();
+        createRequestsToDB();
     }
 
-    public void createTables() throws NoTableAnnotationException, SQLException {
-        runCommand(getCreateRequestToDB());
+    public void insertObject(T object){
+        
+    }
+
+    public void createTables() throws SQLException {
+        runCommand(createRequestToDB);
+        for (ORM<?> orm:
+                ormClassesForReuse.values()) {
+            orm.createTables();
+        }
     }
 
     private void runCommand(String string) throws SQLException {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute(string);
+            System.out.println(string);
         }
     }
 
-    private String getCreateRequestToDB() throws NoTableAnnotationException, SQLException {
-        StringBuilder stringBuilder = new StringBuilder("CREATE TABLE IF NOT EXISTS " + clazz.getAnnotation(Table.class).name() + "(\n");
+
+    private void createRequestsToDB() throws NoTableAnnotationException {
+        StringBuilder createRequest = new StringBuilder("CREATE TABLE IF NOT EXISTS " + clazz.getAnnotation(Table.class).name() + "(\n");
+        StringBuilder insertRequest = new StringBuilder("INSERT INTO " + getTableName() +" (");
 
         // Add id column
-        stringBuilder.append("\tid SERIAL PRIMARY KEY,\n");
-
+        createRequest.append("\tid SERIAL PRIMARY KEY,\n");
+        int k = 0;
         for (Field field: clazz.getDeclaredFields()) {
             field.setAccessible(true);
-
             Element elementAnnotation = field.getAnnotation(Element.class);
             NotNull notNullAnnotation = field.getAnnotation(NotNull.class);
             Unique uniqueAnnotation = field.getAnnotation(Unique.class);
-
             if (Objects.nonNull(elementAnnotation)) {
+                k++;
                 if (typeConverter.containsKey(field.getType())) {
-                    stringBuilder
+                    createRequest
                             .append("\t")
                             .append(elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name())
                             .append(" ")
@@ -88,21 +102,36 @@ public class ORM<T> {
                             .append(Objects.nonNull(notNullAnnotation) ? " NOT NULL" : "")
                             .append(Objects.nonNull(uniqueAnnotation) ? " UNIQUE" : "")
                             .append(",\n");
+                    insertRequest
+                            .append(field.getName())
+                            .append(", ");
                 } else {
                     ORM<?> orm = getORMForClass(field.getType());
-                    orm.createTables();
-                    stringBuilder.append("\t").append(orm.getTableName()).append("id").append(" INT,\n");
+                    createRequest.append("\t").append(orm.getTableName()).append("id").append(" INT,\n");
+                    insertRequest
+                            .append(orm.getTableName())
+                            .append("id")
+                            .append(", ");
                 }
             }
             field.setAccessible(false);
         }
-        stringBuilder.replace(stringBuilder.length() - 2, stringBuilder.length() - 1, ");");
-        return stringBuilder.toString();
+        insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ")");
+        if (k != 0){
+           insertRequest.append("(");
+           while(k != 0){
+               insertRequest.append("?, ");
+               k--;
+           }
+        }
+        createRequest.replace(createRequest.length() - 2, createRequest.length() - 1, ");");
+        insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ");");
+
+
+        createRequestToDB = createRequest.toString();
+        insertRequestToDb = insertRequest.toString();
     }
 
-    private String getInsertRequestToDB(T object) {
-        return object.toString();
-    }
 
     private String getTableName() {
         return clazz.getAnnotation(Table.class).name();

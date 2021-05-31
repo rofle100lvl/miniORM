@@ -17,12 +17,11 @@ public class Main {
 //        User user = new User(123, "govno", new Car(60, "Bugatti"));
 
         PGSimpleDataSource dataSource = new PGSimpleDataSource();
-        dataSource.setURL("jdbc:postgresql://localhost:5432/db");
+        dataSource.setURL("jdbc:postgresql://localhost:5432/orm");
         dataSource.setUser("postgres");
-        dataSource.setPassword("rak830");
+        dataSource.setPassword("zju532");
 
         ORM<User> userORM = new ORM<>(dataSource, User.class);
         userORM.createTables();
-        Iterator<Integer> iterator = Arrays.asList(1, 2, 3).iterator();
     }
 }
