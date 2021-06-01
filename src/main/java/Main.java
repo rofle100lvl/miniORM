@@ -2,24 +2,31 @@ import exceptions.NoTableAnnotationException;
 import org.postgresql.ds.PGSimpleDataSource;
 import orm.ORM;
 
-import java.io.InputStream;
-import java.io.Reader;
-import java.math.BigDecimal;
-import java.net.URL;
-import java.sql.*;
-import java.util.Arrays;
-import java.util.Calendar;
-import java.util.Iterator;
-import java.util.Map;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.sql.SQLException;
+import java.util.Properties;
 
 public class Main {
-    public static void main(String[] args) throws NoTableAnnotationException, SQLException {
-//        User user = new User(123, "govno", new Car(60, "Bugatti"));
+    public static void main(String[] args) throws NoTableAnnotationException, SQLException, FileNotFoundException, IllegalAccessException {
+        User user = new User(123,
+                "govno",
+                new Car(60, "Bugatti"),
+                new YouTuber("Vlad",
+                        new Channel("Кобяков")));
+
+        Properties properties = new Properties();
+        try (FileReader fileReader = new FileReader("src/main/resources/config.properties")) {
+            properties.load(fileReader);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
 
         PGSimpleDataSource dataSource = new PGSimpleDataSource();
-        dataSource.setURL("jdbc:postgresql://localhost:5432/orm");
-        dataSource.setUser("postgres");
-        dataSource.setPassword("zju532");
+        dataSource.setURL(properties.getProperty("db_url"));
+        dataSource.setUser(properties.getProperty("db_user"));
+        dataSource.setPassword(properties.getProperty("db_password"));
 
         ORM<User> userORM = new ORM<>(dataSource, User.class);
         userORM.createTables();

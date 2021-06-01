@@ -3,10 +3,11 @@ import annotations.Table;
 
 @Table(name = "Users")
 public class User {
-    public User(int login, String password, Car car) {
+    public User(int login, String password, Car car, YouTuber youTuber) {
         this.login = login;
         this.password = password;
         this.car = car;
+        this.youTuber = youTuber;
     }
 
     @Element(name = "Login")
@@ -15,4 +16,6 @@ public class User {
     Car car;
     @Element(name = "Password")
     String password;
+    @Element(name = "youtuber")
+    YouTuber youTuber;
 }
