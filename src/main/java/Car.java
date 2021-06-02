@@ -7,6 +7,9 @@ public class Car {
         this.name = name;
     }
 
+    public Car() {
+    }
+
     int price;
 
     @Element(name = "name")

@@ -12,4 +12,7 @@ public class YouTuber {
         this.name = name;
         this.ch = ch;
     }
+
+    public YouTuber() {
+    }
 }

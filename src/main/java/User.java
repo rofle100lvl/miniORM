@@ -10,6 +10,9 @@ public class User {
         this.youTuber = youTuber;
     }
 
+    public User() {
+    }
+
     @Element(name = "Login")
     int login;
     @Element(name = "")

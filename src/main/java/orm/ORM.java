@@ -11,10 +11,12 @@ import tools.CheckedFunction;
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
 import java.sql.*;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 public class ORM<T> {
     private final DataSource dataSource;
@@ -56,6 +58,9 @@ public class ORM<T> {
 
         if (Objects.isNull(clazz.getAnnotation(Table.class))) throw new NoTableAnnotationException();
         createRequestsToDB();
+    }
+
+    public void prepare() throws NoTableAnnotationException {
         createSelect();
     }
 
@@ -101,13 +106,9 @@ public class ORM<T> {
 
     private void createSelect() throws NoTableAnnotationException {
         StringBuilder selectCommand = new StringBuilder("SELECT ");
-        selectCommand.append(createSelectPartOne()
-                .stream()
-                .collect(Collectors.joining(", ")));
-        selectCommand.append(" from ").append(getTableName());
-        selectCommand.append(createSelectPartTwo()
-                .stream()
-                .collect(Collectors.joining("\n")));
+        selectCommand.append(String.join(", ", createSelectPartOne()));
+        selectCommand.append(" from ").append(getTableName()).append("\n");
+        selectCommand.append(String.join("\n", createSelectPartTwo()));
         selectCommand.append(";");
 
         selectRequestToDb = selectCommand.toString();
@@ -123,9 +124,8 @@ public class ORM<T> {
             Element elementAnnotation = field.getAnnotation(Element.class);
             if (Objects.nonNull(elementAnnotation)) {
                 if (typeConverter.containsKey(field.getType())) {
-                    usefulColumns.add(getTableName() + "." + elementAnnotation.name());
+                    usefulColumns.add(getTableName() + "." + (elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name()));
                 } else {
-
                     ORM<?> orm = getORMForClass(field.getType());
                     usefulColumns.addAll(orm.createSelectPartOne());
                 }
@@ -136,24 +136,19 @@ public class ORM<T> {
     }
 
     private ArrayList<String> createSelectPartTwo() throws NoTableAnnotationException {
-        ArrayList<String> usefulTables = new ArrayList<String>();
+        ArrayList<String> usefulTables = new ArrayList<>();
 
         for (Field field: clazz.getDeclaredFields()) {
-            field.setAccessible(true);
             Element elementAnnotation = field.getAnnotation(Element.class);
-            if (Objects.nonNull(elementAnnotation)) {
-                if (!typeConverter.containsKey(field.getType())) {
-                    ORM<?> orm = getORMForClass(field.getType());
-                    usefulTables.add("JOIN " + orm.getTableName() + " ON " + orm.getTableName() + "id = " +
-                            orm.getTableName() + ".id");
-                    usefulTables.addAll(orm.createSelectPartTwo());
-                }
+            if (Objects.nonNull(elementAnnotation) && !typeConverter.containsKey(field.getType())) {
+                ORM<?> orm = getORMForClass(field.getType());
+                usefulTables.add("JOIN " + orm.getTableName() + " ON " + orm.getTableName() + "id = " +
+                        orm.getTableName() + ".id");
+                usefulTables.addAll(orm.createSelectPartTwo());
             }
-            field.setAccessible(false);
         }
         return usefulTables;
     }
-
 
     private void createRequestsToDB() throws NoTableAnnotationException {
         StringBuilder createRequest = new StringBuilder("CREATE TABLE IF NOT EXISTS " + clazz.getAnnotation(Table.class).name() + "(\n");
@@ -161,14 +156,14 @@ public class ORM<T> {
 
         // Add id column
         createRequest.append("\tid SERIAL PRIMARY KEY,\n");
-        int k = 0;
+        int countOfColumns = 0;
         for (Field field: clazz.getDeclaredFields()) {
             field.setAccessible(true);
             Element elementAnnotation = field.getAnnotation(Element.class);
             NotNull notNullAnnotation = field.getAnnotation(NotNull.class);
             Unique uniqueAnnotation = field.getAnnotation(Unique.class);
             if (Objects.nonNull(elementAnnotation)) {
-                k++;
+                countOfColumns++;
                 if (typeConverter.containsKey(field.getType())) {
                     createRequest
                             .append("\t")
@@ -193,11 +188,11 @@ public class ORM<T> {
             field.setAccessible(false);
         }
         insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ")").append(" VALUES ");
-        if (k != 0){
+        if (countOfColumns != 0){
            insertRequest.append("(");
-           while(k != 0){
+           while(countOfColumns != 0){
                insertRequest.append("?, ");
-               k--;
+               countOfColumns--;
            }
         }
         createRequest.replace(createRequest.length() - 2, createRequest.length() - 1, ");");
@@ -207,7 +202,6 @@ public class ORM<T> {
         createTableRequestToDB = createRequest.toString();
         insertRequestToDb = insertRequest.toString();
     }
-
 
     private String getTableName() {
         return clazz.getAnnotation(Table.class).name();
