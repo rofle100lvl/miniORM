@@ -38,7 +38,17 @@ public class Main {
         sf.prepare();
         sf.createTables();
 
-        for (int i = 0; i++ < 10;) sf.save(user);
+        for (int i = 0; i++ < 10;) {
+            (new Thread(() -> {
+                try {
+                    sf.save(user);
+//                    List<User> users = sf.getObjects();
+
+                } catch (SQLException throwables) {
+                    throwables.printStackTrace();
+                }
+            })).start();
+        }
 
         System.out.println(user.id);
         sf.remove(user);

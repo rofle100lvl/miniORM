@@ -10,6 +10,11 @@ import java.lang.reflect.Field;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicIntegerArray;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReadWriteLock;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -20,6 +25,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
     private static final ConcurrentHashMap<Class<?>, String> typeConverter = new ConcurrentHashMap<>();
     private static final Map<Class<?>, CheckedFunction<String, Object, ConvertInstructionException>> toObjectConvertInstructions = new HashMap<>();
     private final Map<Class<?>, ShadowFiend<?>> ormInstancesForClasses = new HashMap<>();
+    private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
 
     // Flags
     private boolean iSPrepared = false;
@@ -36,42 +42,51 @@ public class ShadowFiend<T> implements ORMInterface<T> {
     @Override
     public void save(T object) throws SQLException {
         try {
+            readWriteLock.writeLock().lock();
             insert(object, null);
         } catch (IllegalAccessException ignored) { }
+        finally {
+            readWriteLock.writeLock().unlock();
+        }
     }
 
     @Override
     public List<T> getObjects() throws SQLException {
+        List<T> list = null;
         try {
-            return getSelectToTableRequest().stream().map(o -> (T) o).collect(Collectors.toList());
-        } catch (InstantiationException e) {
+            readWriteLock.readLock().lock();
+            list = getSelectToTableRequest().stream().map(o -> (T) o).collect(Collectors.toList());
+        } catch (InstantiationException | IllegalAccessException | ConvertInstructionException e) {
             e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (ConvertInstructionException e) {
-            e.printStackTrace();
-        } return null;
+        } finally {
+            readWriteLock.readLock().unlock();
+        }
+        return list;
     }
 
     @Override
     public List<T> getObjects(String... fetch) throws SQLException {
+        List<T> list = null;
         try {
-            return getObjWithFetch(fetch).stream().map(o -> (T) o).collect(Collectors.toList());
-        } catch (InstantiationException e) {
+            readWriteLock.readLock().lock();
+            list = getObjWithFetch(fetch).stream().map(o -> (T) o).collect(Collectors.toList());
+        } catch (InstantiationException | IllegalAccessException | ConvertInstructionException e) {
             e.printStackTrace();
-        } catch (IllegalAccessException e) {
-            e.printStackTrace();
-        } catch (ConvertInstructionException e) {
-            e.printStackTrace();
-        } return null;
+        } finally {
+            readWriteLock.readLock().unlock();
+        }
+        return list;
     }
 
     @Override
     public void remove(T object) throws SQLException {
         try {
+            readWriteLock.writeLock().lock();
             deleteFromDB(object);
         } catch (IllegalAccessException e) {
             e.printStackTrace();
+        } finally {
+            readWriteLock.writeLock().unlock();
         }
     }
 
