@@ -1,9 +1,6 @@
 package orm;
 
-import annotations.Element;
-import annotations.NotNull;
-import annotations.Table;
-import annotations.Unique;
+import annotations.*;
 import exceptions.ConvertInstructionException;
 import exceptions.NotPreparedException;
 import tools.CheckedFunction;
@@ -57,13 +54,25 @@ public class ShadowFiend<T> implements ORMInterface<T> {
     }
 
     @Override
-    public ArrayList<T> getObjects(String... fetch) throws SQLException {
-        return null;
+    public List<T> getObjects(String... fetch) throws SQLException {
+        try {
+            return getObjWithFetch(fetch).stream().map(o -> (T) o).collect(Collectors.toList());
+        } catch (InstantiationException e) {
+            e.printStackTrace();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        } catch (ConvertInstructionException e) {
+            e.printStackTrace();
+        } return null;
     }
 
     @Override
     public void remove(T object) throws SQLException {
-
+        try {
+            deleteFromDB(object);
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
     }
 
     public void prepare() {
@@ -85,6 +94,20 @@ public class ShadowFiend<T> implements ORMInterface<T> {
 
     // Private methods
 
+    private void deleteFromDB(Object o) throws SQLException, IllegalAccessException {
+        try (Connection connection = dataSource.getConnection();
+             Statement statement = connection.createStatement()) {
+            for (Field field:
+                 clazz.getDeclaredFields()) {
+                if (Objects.nonNull(field.getAnnotation(Id.class))) {
+                    field.setAccessible(true);
+                    statement.execute("DELETE FROM " + getTableName() + " WHERE id = " + field.get(o));
+                    field.setAccessible(false);
+                }
+            }
+        }
+    }
+
     private ArrayList<Object> getSelectToTableRequest() throws SQLException, InstantiationException, IllegalAccessException, ConvertInstructionException {
         ArrayList<Object> objects = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
@@ -105,10 +128,12 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                             field.set(object, toObjectConvertInstructions.get(field.getType()).apply(value));
                         } else {
                             ShadowFiend<?> orm = getORMForClass(field.getType());
-                            String id = resultSet.getString("id");
-                            System.out.println(getTableName() + "_id = " + id);
-                            field.set(object, orm.getObjWithFetch(getTableName() + "_id = " + id).get(0));
+                            String id = resultSet.getString(Constants.id);
+                            field.set(object, orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id).get(0));
                         }
+                    }
+                    if (Objects.nonNull(field.getAnnotation(Id.class))) {
+                        field.set(object, resultSet.getInt(Constants.id));
                     }
                 }
                 objects.add(object);
@@ -121,8 +146,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         ArrayList<Object> objects = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
-            System.out.println("SELECT * FROM " + getTableName() + " WHERE " + String.join(" AND ", fetch) + ";");
-            ResultSet resultSet = statement.executeQuery("SELECT * FROM " + getTableName() + " WHERE " + String.join(" AND ", fetch) + ";");
+            ResultSet resultSet = statement.executeQuery("SELECT * FROM " + getTableName() + " WHERE " + String.join(" AND ", fetch));
 
             while (resultSet.next()) {
 
@@ -138,8 +162,8 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                             field.set(object, toObjectConvertInstructions.get(field.getType()).apply(value));
                         } else {
                             ShadowFiend<?> orm = getORMForClass(field.getType());
-                            String id = resultSet.getString("id");
-                            field.set(object, orm.getObjWithFetch(getTableName() + "_id = " + id));
+                            String id = resultSet.getString(Constants.id);
+                            field.set(object, orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id).get(0));
                         }
                     }
                 }
@@ -153,6 +177,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         try (Connection connection = dataSource.getConnection();
              PreparedStatement preparedStatement = connection.prepareStatement(insertRequestToDb)) {
             int index = 1;
+            Field idField = null;
             if (Objects.nonNull(identifier)) {
                 preparedStatement.setInt(index++, identifier);
             }
@@ -160,7 +185,9 @@ public class ShadowFiend<T> implements ORMInterface<T> {
             for (Field field:
                  clazz.getDeclaredFields()) {
                 field.setAccessible(true);
+
                 Element elementAnnotation = field.getAnnotation(Element.class);
+                Id idAnnotation = field.getAnnotation(Id.class);
 
                 if (Objects.nonNull(elementAnnotation)) {
                     if (typeConverter.containsKey(field.getType())) {
@@ -170,12 +197,21 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                         nonPrimaryElements.add(field.get(object));
                     }
                 }
+                if (Objects.nonNull(idAnnotation)) idField = field;
+                field.setAccessible(false);
             }
             ResultSet resultSet = preparedStatement.executeQuery();
             resultSet.next();
+
+            if (Objects.nonNull(idField)) {
+                idField.setAccessible(true);
+                idField.set(object, resultSet.getInt(Constants.id));
+                idField.setAccessible(false);
+            }
+
             for (Object element:
                  nonPrimaryElements) {
-                ormInstancesForClasses.get(element.getClass()).insert(element, resultSet.getInt("id"));
+                ormInstancesForClasses.get(element.getClass()).insert(element, resultSet.getInt(Constants.id));
             }
         }
     }
@@ -216,7 +252,6 @@ public class ShadowFiend<T> implements ORMInterface<T> {
 
         insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ") RETURNING id;");
         insertRequestToDb = insertRequest.toString();
-        System.out.println(insertRequestToDb);
         iSPrepared = true;
     }
 
@@ -294,23 +329,36 @@ public class ShadowFiend<T> implements ORMInterface<T> {
     }
 
     static {
-        addInstructionsForType(Integer.class, getWrappedParseNumFunction(Integer::parseInt), "INT");
-        addInstructionsForType(Long.class, getWrappedParseNumFunction(Long::parseLong), "BIGINT");
-        addInstructionsForType(Boolean.class, getWrappedParseNumFunction(Boolean::parseBoolean), "BOOLEAN");
-        addInstructionsForType(Byte.class, getWrappedParseNumFunction(Byte::parseByte), "SMALLINT");
-        addInstructionsForType(Float.class, getWrappedParseNumFunction(Float::parseFloat), "REAL");
-        addInstructionsForType(Double.class, getWrappedParseNumFunction(Double::parseDouble), "DOUBLE");
-        addInstructionsForType(Short.class, getWrappedParseNumFunction(Short::parseShort), "SMALLINT");
-        addInstructionsForType(String.class, string -> string, "TEXT");
-        addInstructionsForType(Character.class, string -> string.charAt(0), "CHARACTER [1]");
+        addInstructionsForType(Integer.class, getWrappedParseNumFunction(Integer::parseInt), Constants.intDB);
+        addInstructionsForType(Long.class, getWrappedParseNumFunction(Long::parseLong), Constants.bigIntDB);
+        addInstructionsForType(Boolean.class, getWrappedParseNumFunction(Boolean::parseBoolean), Constants.booleanDB);
+        addInstructionsForType(Byte.class, getWrappedParseNumFunction(Byte::parseByte), Constants.smallIntDB);
+        addInstructionsForType(Float.class, getWrappedParseNumFunction(Float::parseFloat), Constants.realDB);
+        addInstructionsForType(Double.class, getWrappedParseNumFunction(Double::parseDouble), Constants.doubleDB);
+        addInstructionsForType(Short.class, getWrappedParseNumFunction(Short::parseShort), Constants.smallIntDB);
+        addInstructionsForType(String.class, string -> string, Constants.textDB);
+        addInstructionsForType(Character.class, string -> string.charAt(0), Constants.charDB);
 
-        addInstructionsForType(int.class, getWrappedParseNumFunction(Integer::parseInt), "INT");
-        addInstructionsForType(long.class, getWrappedParseNumFunction(Long::parseLong), "BIGINT");
-        addInstructionsForType(boolean.class, getWrappedParseNumFunction(Boolean::parseBoolean), "BOOLEAN");
-        addInstructionsForType(byte.class, getWrappedParseNumFunction(Byte::parseByte), "SMALLINT");
-        addInstructionsForType(float.class, getWrappedParseNumFunction(Float::parseFloat), "REAL");
-        addInstructionsForType(double.class, getWrappedParseNumFunction(Double::parseDouble), "DOUBLE");
-        addInstructionsForType(short.class, getWrappedParseNumFunction(Short::parseShort), "SMALLINT");
-        addInstructionsForType(char.class, string -> string.charAt(0), "CHARACTER [1]");
+        addInstructionsForType(int.class, getWrappedParseNumFunction(Integer::parseInt), Constants.intDB);
+        addInstructionsForType(long.class, getWrappedParseNumFunction(Long::parseLong), Constants.bigIntDB);
+        addInstructionsForType(boolean.class, getWrappedParseNumFunction(Boolean::parseBoolean), Constants.booleanDB);
+        addInstructionsForType(byte.class, getWrappedParseNumFunction(Byte::parseByte), Constants.smallIntDB);
+        addInstructionsForType(float.class, getWrappedParseNumFunction(Float::parseFloat), Constants.realDB);
+        addInstructionsForType(double.class, getWrappedParseNumFunction(Double::parseDouble), Constants.doubleDB);
+        addInstructionsForType(short.class, getWrappedParseNumFunction(Short::parseShort), Constants.smallIntDB);
+        addInstructionsForType(char.class, string -> string.charAt(0), Constants.charDB);
+    }
+
+    private static final class Constants {
+        static String intDB = "INT";
+        static String bigIntDB = "BIGINT";
+        static String booleanDB = "BOOLEAN";
+        static String smallIntDB = "SMALLINT";
+        static String realDB = "REAL";
+        static String doubleDB = "DOUBLE";
+        static String textDB = "TEXT";
+        static String charDB = "CHARACTER [1]";
+
+        static String id = "id";
     }
 }

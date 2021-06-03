@@ -15,10 +15,10 @@ import java.util.Properties;
 public class Main {
     public static void main(String[] args) throws NoTableAnnotationException, SQLException, FileNotFoundException, IllegalAccessException, NotPreparedException {
         User user = new User(123,
-                "govno",
-                new Car(60, "Bugatti"),
-                new YouTuber("Vlad",
-                        new Channel("Кобяков")));
+                "gofgdvno",
+                new Car(60, "yergd"),
+                new YouTuber("Vfdlad",
+                        new Channel("Кобяgfdgdefков")));
 
         Properties properties = new Properties();
         try (FileReader fileReader = new FileReader("src/main/resources/config.properties")) {
@@ -37,6 +37,13 @@ public class Main {
         ShadowFiend<User> sf = new ShadowFiend<>(dataSource, User.class);
         sf.prepare();
         sf.createTables();
+
+        for (int i = 0; i++ < 10;) sf.save(user);
+
+        System.out.println(user.id);
+        sf.remove(user);
+
+
         List<User> users = sf.getObjects();
         users.forEach(System.out::println);
 
