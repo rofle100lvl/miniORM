@@ -1,7 +1,6 @@
-import annotations.Element;
-import annotations.Id;
-import annotations.NotNull;
-import annotations.Table;
+import annotations.*;
+
+import java.util.ArrayList;
 
 @Table(name = "Channels")
 public class Channel {

@@ -4,8 +4,8 @@ import annotations.Table;
 
 @Table(name = "YouTubers")
 public class YouTuber {
-    @Id
-    int id;
+//    @Id
+//    int id;
     @Element
     String name;
     @Element
@@ -22,8 +22,7 @@ public class YouTuber {
     @Override
     public String toString() {
         return "YouTuber{" +
-                "id=" + id +
-                ", name='" + name + '\'' +
+                "name='" + name + '\'' +
                 ", ch=" + ch +
                 '}';
     }

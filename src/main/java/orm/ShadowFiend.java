@@ -7,6 +7,7 @@ import tools.CheckedFunction;
 
 import javax.sql.DataSource;
 import java.lang.reflect.Field;
+import java.lang.reflect.ParameterizedType;
 import java.sql.*;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
@@ -150,6 +151,9 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                     if (Objects.nonNull(field.getAnnotation(Id.class))) {
                         field.set(object, resultSet.getInt(Constants.id));
                     }
+                    if (Objects.nonNull(field.getAnnotation(ToManyElement.class))) {
+                        setArrayToField(resultSet, object, field);
+                    }
                 }
                 objects.add(object);
             }
@@ -171,6 +175,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                         clazz.getDeclaredFields()) {
                     field.setAccessible(true);
                     Element elementAnnotation = field.getAnnotation(Element.class);
+                    ToManyElement toManyElement = field.getAnnotation(ToManyElement.class);
                     if (Objects.nonNull(field.getAnnotation(Element.class))) {
                         if (typeConverter.containsKey(field.getType())) {
                             String value = resultSet.getString(elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name());
@@ -181,11 +186,24 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                             field.set(object, orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id).get(0));
                         }
                     }
+                    if (Objects.nonNull(toManyElement)) {
+                        setArrayToField(resultSet, object, field);
+                    }
                 }
                 objects.add(object);
             }
         }
         return objects;
+    }
+
+    private void setArrayToField(ResultSet resultSet, Object object, Field field) throws SQLException, InstantiationException, IllegalAccessException, ConvertInstructionException {
+        String id = resultSet.getString(Constants.id);
+        ParameterizedType paraType = (ParameterizedType) field.getGenericType();
+        Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
+        ShadowFiend<?> orm = getORMForClass(aClass);
+        ArrayList arrayList = new ArrayList();
+        arrayList.addAll(orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id));
+        field.set(object, arrayList);
     }
 
     private void insert(Object object, Integer identifier) throws SQLException, IllegalAccessException {
@@ -199,9 +217,11 @@ public class ShadowFiend<T> implements ORMInterface<T> {
             LinkedList<Object> nonPrimaryElements = new LinkedList<>();
             for (Field field:
                  clazz.getDeclaredFields()) {
+
                 field.setAccessible(true);
 
                 Element elementAnnotation = field.getAnnotation(Element.class);
+                ToManyElement toManyElement = field.getAnnotation(ToManyElement.class);
                 Id idAnnotation = field.getAnnotation(Id.class);
 
                 if (Objects.nonNull(elementAnnotation)) {
@@ -212,7 +232,14 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                         nonPrimaryElements.add(field.get(object));
                     }
                 }
+
                 if (Objects.nonNull(idAnnotation)) idField = field;
+
+                if (Objects.nonNull(toManyElement)) {
+                    ArrayList arr = (ArrayList) field.get(object);
+                    arr.forEach(o -> nonPrimaryElements.add(o));
+                }
+
                 field.setAccessible(false);
             }
             ResultSet resultSet = preparedStatement.executeQuery();
@@ -226,7 +253,8 @@ public class ShadowFiend<T> implements ORMInterface<T> {
 
             for (Object element:
                  nonPrimaryElements) {
-                ormInstancesForClasses.get(element.getClass()).insert(element, resultSet.getInt(Constants.id));
+                System.out.println(element);
+                getORMForClass(element.getClass()).insert(element, resultSet.getInt(Constants.id));
             }
         }
     }
@@ -243,6 +271,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         for (Field field:
              clazz.getDeclaredFields()) {
             Element elementAnnotation = field.getAnnotation(Element.class);
+            ToManyElement toManyElementAnnotation = field.getAnnotation(ToManyElement.class);
             if (Objects.nonNull(elementAnnotation)) {
                 if (typeConverter.containsKey(field.getType())) {
                     countOfColumns++;
@@ -253,6 +282,12 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                     ShadowFiend<?> orm = getORMForClass(field.getType());
                     orm.getInsertToTableRequest(getTableName());
                 }
+            }
+            if (Objects.nonNull(toManyElementAnnotation)) {
+                ParameterizedType paraType = (ParameterizedType) field.getGenericType();
+                Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
+                ShadowFiend<?> orm = getORMForClass(aClass);
+                orm.getInsertToTableRequest(getTableName());
             }
         }
         insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ")")
@@ -280,6 +315,7 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         for (Field field:
                 clazz.getDeclaredFields()) {
             Element elementAnnotation = field.getAnnotation(Element.class);
+            ToManyElement toManyElementAnnotation = field.getAnnotation(ToManyElement.class);
             NotNull notNullAnnotation = field.getAnnotation(NotNull.class);
             Unique uniqueAnnotation = field.getAnnotation(Unique.class);
             if (Objects.nonNull(elementAnnotation)) {
@@ -296,6 +332,12 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                     ShadowFiend<?> orm = getORMForClass(field.getType());
                     orm.getCreateTableRequest(getTableName());
                 }
+            }
+            if (Objects.nonNull(toManyElementAnnotation)) {
+                ParameterizedType paraType = (ParameterizedType) field.getGenericType();
+                Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
+                ShadowFiend<?> orm = getORMForClass(aClass);
+                orm.getCreateTableRequest(getTableName());
             }
         }
         if (Objects.nonNull(ownerTableName)) {

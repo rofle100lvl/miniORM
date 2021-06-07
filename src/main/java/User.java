@@ -1,14 +1,16 @@
 import annotations.Element;
 import annotations.Id;
 import annotations.Table;
+import annotations.ToManyElement;
+
+import java.util.ArrayList;
 
 @Table(name = "Users")
 public class User {
-    public User(int login, String password, Car car, YouTuber youTuber) {
+    public User(int login, String password, ArrayList<Car> cars, YouTuber youTuber) {
         this.login = login;
         this.password = password;
-        this.car = car;
-        this.carr = car;
+        this.cars = cars;
         this.youTuber = youTuber;
     }
 
@@ -19,10 +21,8 @@ public class User {
     int id;
     @Element(name = "Login")
     int login;
-    @Element(name = "")
-    Car car;
-    @Element(name = "")
-    Car carr;
+    @ToManyElement(name = "")
+    ArrayList<Car> cars;
     @Element(name = "Password")
     String password;
     @Element(name = "youtuber")
@@ -33,8 +33,7 @@ public class User {
         return "User{" +
                 "id=" + id +
                 ", login=" + login +
-                ", car=" + car +
-                ", carr=" + carr +
+                ", cars=" + cars +
                 ", password='" + password + '\'' +
                 ", youTuber=" + youTuber +
                 '}';
