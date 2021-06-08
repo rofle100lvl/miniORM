@@ -1,11 +1,8 @@
-import annotations.Element;
-import annotations.Id;
 import annotations.Table;
-
-@Table(name = "YouTubers")
+import annotations.relationshipType.Element;
+@Table("yt")
 public class YouTuber {
-//    @Id
-//    int id;
+
     @Element
     String name;
     @Element

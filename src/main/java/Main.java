@@ -1,7 +1,8 @@
 import exceptions.NoTableAnnotationException;
 import exceptions.NotPreparedException;
 import org.postgresql.ds.PGSimpleDataSource;
-import orm.ShadowFiend;
+import orm.ORM;
+import orm.ORMInterface;
 
 import java.io.FileNotFoundException;
 import java.io.FileReader;
@@ -26,24 +27,16 @@ public class Main {
         dataSource.setUser(properties.getProperty("db_user"));
         dataSource.setPassword(properties.getProperty("db_password"));
 
-//        ORM<User> userORM = new ORM<>(dataSource, User.class);
-//        userORM.prepare();
         ArrayList<Car> cars = new ArrayList<>();
-        cars.add(new Car(44, "I love HENTAI"));
-        cars.add(new Car(13, "I love ANIME"));
-        User user = new User(123789, "old", cars, new YouTuber("Vlad", new Channel("A4")));
+        cars.add(new Car(123, "I love HENTAI"));
+        cars.add(new Car(133, "I love ANIME"));
+        User user = new User(123789, "o111111111111", cars, new YouTuber("Vlad", new Channel("A4")));
 
-        ShadowFiend<User> sf = new ShadowFiend<>(dataSource, User.class);
-        sf.prepare();
-        sf.createTables();
-
-        sf.save(user);
-
-        System.out.println(user.id);
-
-
-        List<User> users = sf.getObjects();
-        users.forEach(System.out::println);
-
+        ORM<User> userORM = new ORM<>(dataSource, User.class);
+        userORM.prepare();
+        userORM.createTables();
+        // userORM.save(user);
+        userORM.getObjects().forEach(System.out::println);
+        userORM.update(user);
     }
 }

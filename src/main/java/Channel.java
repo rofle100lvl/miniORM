@@ -1,20 +1,19 @@
-import annotations.*;
+import annotations.Id;
+import annotations.Table;
+import annotations.relationshipType.Element;
 
-import java.util.ArrayList;
-
-@Table(name = "Channels")
+@Table("ch")
 public class Channel {
+    @Id
+    int id;
     @Element
     String name;
 
-    public Channel() {
-    }
-
-    @Id
-    int id;
-
     public Channel(String name) {
         this.name = name;
+    }
+
+    public Channel() {
     }
 
     @Override

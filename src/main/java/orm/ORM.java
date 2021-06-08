@@ -1,8 +1,11 @@
 package orm;
 
-import annotations.*;
+import annotations.Id;
+import annotations.Table;
+import annotations.constraints.*;
+import annotations.relationshipType.Element;
+import annotations.relationshipType.OneToMany;
 import exceptions.ConvertInstructionException;
-import exceptions.NotPreparedException;
 import tools.CheckedFunction;
 
 import javax.sql.DataSource;
@@ -10,111 +13,92 @@ import java.lang.reflect.Field;
 import java.lang.reflect.ParameterizedType;
 import java.sql.*;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicIntegerArray;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReadWriteLock;
-import java.util.concurrent.locks.ReentrantReadWriteLock;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
-public class ShadowFiend<T> implements ORMInterface<T> {
+public class ORM<T> implements ORMInterface<T> {
     private final DataSource dataSource;
     private final Class<? super T> clazz;
 
-    private static final ConcurrentHashMap<Class<?>, String> typeConverter = new ConcurrentHashMap<>();
+    // Map with instance of orm for classes
+    private static final Map<Class<?>, String> typeConverter = new HashMap<>();
     private static final Map<Class<?>, CheckedFunction<String, Object, ConvertInstructionException>> toObjectConvertInstructions = new HashMap<>();
-    private final Map<Class<?>, ShadowFiend<?>> ormInstancesForClasses = new HashMap<>();
-    private final ReadWriteLock readWriteLock = new ReentrantReadWriteLock();
-
-    // Flags
-    private boolean iSPrepared = false;
+    private final Map<Class<?>, ORM<?>> ormInstancesForClasses = new HashMap<>();
 
     // Strings with requests to db
     private String createTableRequestToDB;
     private String insertRequestToDb;
 
-    public ShadowFiend(DataSource dataSource, Class<? super T> clazz) {
+    public ORM(DataSource dataSource, Class<? super T> clazz) {
         this.dataSource = dataSource;
         this.clazz = clazz;
     }
 
     @Override
-    public void save(T object) throws SQLException {
+    public boolean save(T object) throws SQLException {
         try {
-            readWriteLock.writeLock().lock();
             insert(object, null);
         } catch (IllegalAccessException ignored) { }
-        finally {
-            readWriteLock.writeLock().unlock();
-        }
+        return true;
     }
 
     @Override
     public List<T> getObjects() throws SQLException {
-        List<T> list = null;
         try {
-            readWriteLock.readLock().lock();
-            list = getSelectToTableRequest().stream().map(o -> (T) o).collect(Collectors.toList());
+            return (List<T>) getObjWithFetch(new String[]{});
         } catch (InstantiationException | IllegalAccessException | ConvertInstructionException e) {
             e.printStackTrace();
-        } finally {
-            readWriteLock.readLock().unlock();
         }
-        return list;
+        return new ArrayList<>();
     }
 
     @Override
     public List<T> getObjects(String... fetch) throws SQLException {
-        List<T> list = null;
         try {
-            readWriteLock.readLock().lock();
-            list = getObjWithFetch(fetch).stream().map(o -> (T) o).collect(Collectors.toList());
+            return (List<T>) getObjWithFetch(fetch);
         } catch (InstantiationException | IllegalAccessException | ConvertInstructionException e) {
             e.printStackTrace();
-        } finally {
-            readWriteLock.readLock().unlock();
         }
-        return list;
+        return new ArrayList<>();
     }
 
     @Override
-    public void remove(T object) throws SQLException {
+    public boolean remove(T object) throws SQLException {
         try {
-            readWriteLock.writeLock().lock();
             deleteFromDB(object);
+            return true;
         } catch (IllegalAccessException e) {
             e.printStackTrace();
-        } finally {
-            readWriteLock.writeLock().unlock();
         }
+        return false;
+    }
+
+    @Override
+    public boolean update(T object) throws SQLException {
+        return true;
     }
 
     public void prepare() {
-        getCreateTableRequest(null);
-        getInsertToTableRequest(null);
+        setCreateTableRequestToDB(null);
+        setInsertRequestToDb(null);
     }
 
-    public void createTables() throws NotPreparedException, SQLException {
-        if (!iSPrepared) throw new NotPreparedException();
+    public void createTables() throws SQLException {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             statement.execute(createTableRequestToDB);
         }
-        for (ShadowFiend<?> sf:
+        for (ORM<?> orm:
              ormInstancesForClasses.values()) {
-            sf.createTables();
+            orm.createTables();
         }
     }
 
-    // Private methods
-
+    // Private Methods
     private void deleteFromDB(Object o) throws SQLException, IllegalAccessException {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
             for (Field field:
-                 clazz.getDeclaredFields()) {
+                    clazz.getDeclaredFields()) {
                 if (Objects.nonNull(field.getAnnotation(Id.class))) {
                     field.setAccessible(true);
                     statement.execute("DELETE FROM " + getTableName() + " WHERE id = " + field.get(o));
@@ -124,48 +108,14 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         }
     }
 
-    private ArrayList<Object> getSelectToTableRequest() throws SQLException, InstantiationException, IllegalAccessException, ConvertInstructionException {
-        ArrayList<Object> objects = new ArrayList<>();
-        try (Connection connection = dataSource.getConnection();
-             Statement statement = connection.createStatement()) {
-            statement.execute("SELECT * FROM " + getTableName());
-            ResultSet resultSet = statement.getResultSet();
-
-            while (resultSet.next()) {
-
-                Object object = clazz.newInstance();
-
-                for (Field field :
-                        clazz.getDeclaredFields()) {
-                    field.setAccessible(true);
-                    if (Objects.nonNull(field.getAnnotation(Element.class))) {
-                        if (typeConverter.containsKey(field.getType())) {
-                            String value = resultSet.getString(field.getAnnotation(Element.class).name());
-                            field.set(object, toObjectConvertInstructions.get(field.getType()).apply(value));
-                        } else {
-                            ShadowFiend<?> orm = getORMForClass(field.getType());
-                            String id = resultSet.getString(Constants.id);
-                            field.set(object, orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id).get(0));
-                        }
-                    }
-                    if (Objects.nonNull(field.getAnnotation(Id.class))) {
-                        field.set(object, resultSet.getInt(Constants.id));
-                    }
-                    if (Objects.nonNull(field.getAnnotation(ToManyElement.class))) {
-                        setArrayToField(resultSet, object, field);
-                    }
-                }
-                objects.add(object);
-            }
-        }
-        return objects;
-    }
-
     private ArrayList<Object> getObjWithFetch(String... fetch) throws SQLException, InstantiationException, IllegalAccessException, ConvertInstructionException {
         ArrayList<Object> objects = new ArrayList<>();
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
-            ResultSet resultSet = statement.executeQuery("SELECT * FROM " + getTableName() + " WHERE " + String.join(" AND ", fetch));
+            ResultSet resultSet = statement.executeQuery("SELECT * FROM "
+                    + getTableName()
+                    + (fetch.length > 0 ? " WHERE " : " ")
+                    + String.join(" AND ", fetch));
 
             while (resultSet.next()) {
 
@@ -175,19 +125,26 @@ public class ShadowFiend<T> implements ORMInterface<T> {
                         clazz.getDeclaredFields()) {
                     field.setAccessible(true);
                     Element elementAnnotation = field.getAnnotation(Element.class);
-                    ToManyElement toManyElement = field.getAnnotation(ToManyElement.class);
-                    if (Objects.nonNull(field.getAnnotation(Element.class))) {
+                    OneToMany toManyElement = field.getAnnotation(OneToMany.class);
+                    Id idAnnotation = field.getAnnotation(Id.class);
+                    if (Objects.nonNull(elementAnnotation)) {
                         if (typeConverter.containsKey(field.getType())) {
                             String value = resultSet.getString(elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name());
                             field.set(object, toObjectConvertInstructions.get(field.getType()).apply(value));
+                        } else if (String.class.equals(field.getType())) {
+                            String value = resultSet.getString(elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name());
+                            field.set(object, value);
                         } else {
-                            ShadowFiend<?> orm = getORMForClass(field.getType());
-                            String id = resultSet.getString(Constants.id);
-                            field.set(object, orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id).get(0));
+                            ORM<?> orm = getORMForClass(field.getType());
+                            String id = resultSet.getString("id");
+                            field.set(object, orm.getObjWithFetch(getTableName() + "_id = " + id).get(0));
                         }
                     }
                     if (Objects.nonNull(toManyElement)) {
                         setArrayToField(resultSet, object, field);
+                    }
+                    if (Objects.nonNull(idAnnotation)) {
+                        field.set(object, resultSet.getInt("id"));
                     }
                 }
                 objects.add(object);
@@ -197,12 +154,12 @@ public class ShadowFiend<T> implements ORMInterface<T> {
     }
 
     private void setArrayToField(ResultSet resultSet, Object object, Field field) throws SQLException, InstantiationException, IllegalAccessException, ConvertInstructionException {
-        String id = resultSet.getString(Constants.id);
+        String id = resultSet.getString("id");
         ParameterizedType paraType = (ParameterizedType) field.getGenericType();
         Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
-        ShadowFiend<?> orm = getORMForClass(aClass);
+        ORM<?> orm = getORMForClass(aClass);
         ArrayList arrayList = new ArrayList();
-        arrayList.addAll(orm.getObjWithFetch(getTableName() + "_" + Constants.id + " = " + id));
+        arrayList.addAll(orm.getObjWithFetch(getTableName() + "_id = " + id));
         field.set(object, arrayList);
     }
 
@@ -216,16 +173,16 @@ public class ShadowFiend<T> implements ORMInterface<T> {
             }
             LinkedList<Object> nonPrimaryElements = new LinkedList<>();
             for (Field field:
-                 clazz.getDeclaredFields()) {
+                    clazz.getDeclaredFields()) {
 
                 field.setAccessible(true);
 
                 Element elementAnnotation = field.getAnnotation(Element.class);
-                ToManyElement toManyElement = field.getAnnotation(ToManyElement.class);
+                OneToMany toManyElement = field.getAnnotation(OneToMany.class);
                 Id idAnnotation = field.getAnnotation(Id.class);
 
                 if (Objects.nonNull(elementAnnotation)) {
-                    if (typeConverter.containsKey(field.getType())) {
+                    if (typeConverter.containsKey(field.getType()) || String.class.equals(field.getType())) {
                         preparedStatement.setObject(index++, field.get(object));
                     }
                     else {
@@ -247,47 +204,52 @@ public class ShadowFiend<T> implements ORMInterface<T> {
 
             if (Objects.nonNull(idField)) {
                 idField.setAccessible(true);
-                idField.set(object, resultSet.getInt(Constants.id));
+                idField.set(object, resultSet.getInt("id"));
+                System.out.println(resultSet.getInt("id"));
+                System.out.println(idField.getName());
                 idField.setAccessible(false);
             }
 
             for (Object element:
-                 nonPrimaryElements) {
-                System.out.println(element);
-                getORMForClass(element.getClass()).insert(element, resultSet.getInt(Constants.id));
+                    nonPrimaryElements) {
+                getORMForClass(element.getClass()).insert(element, resultSet.getInt("id"));
             }
         }
     }
 
-    private void getInsertToTableRequest(String ownerTable) {
+
+    // Methods for creating requests
+    private void setInsertRequestToDb(String ownerTable) {
         StringBuilder insertRequest = new StringBuilder("INSERT INTO " + getTableName() +" (");
 
-        if(Objects.nonNull(ownerTable)){
+        if (Objects.nonNull(ownerTable)) {
             insertRequest
                     .append(ownerTable +"_id")
                     .append(", ");
         }
+
         int countOfColumns = Objects.nonNull(ownerTable) ?  1 : 0;
         for (Field field:
-             clazz.getDeclaredFields()) {
-            Element elementAnnotation = field.getAnnotation(Element.class);
-            ToManyElement toManyElementAnnotation = field.getAnnotation(ToManyElement.class);
-            if (Objects.nonNull(elementAnnotation)) {
-                if (typeConverter.containsKey(field.getType())) {
+                clazz.getDeclaredFields()) {
+            Optional<Element> elementAnnotation = Optional.ofNullable(field.getAnnotation(Element.class));
+            Optional<OneToMany> toManyElementAnnotation = Optional.ofNullable(field.getAnnotation(OneToMany.class));
+
+            if (elementAnnotation.isPresent()) {
+                if (typeConverter.containsKey(field.getType()) || String.class.equals(field.getType())) {
                     countOfColumns++;
                     insertRequest
                             .append(field.getName())
                             .append(", ");
                 } else {
-                    ShadowFiend<?> orm = getORMForClass(field.getType());
-                    orm.getInsertToTableRequest(getTableName());
+                    ORM<?> orm = getORMForClass(field.getType());
+                    orm.setInsertRequestToDb(getTableName());
                 }
             }
-            if (Objects.nonNull(toManyElementAnnotation)) {
+            if (toManyElementAnnotation.isPresent()) {
                 ParameterizedType paraType = (ParameterizedType) field.getGenericType();
                 Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
-                ShadowFiend<?> orm = getORMForClass(aClass);
-                orm.getInsertToTableRequest(getTableName());
+                ORM<?> orm = getORMForClass(aClass);
+                orm.setInsertRequestToDb(getTableName());
             }
         }
         insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ")")
@@ -302,88 +264,98 @@ public class ShadowFiend<T> implements ORMInterface<T> {
 
         insertRequest.replace(insertRequest.length() - 2, insertRequest.length() - 1, ") RETURNING id;");
         insertRequestToDb = insertRequest.toString();
-        iSPrepared = true;
+        System.out.println(insertRequestToDb);
     }
 
-    private void getCreateTableRequest(String ownerTableName) {
-        StringBuilder createRequest = new StringBuilder("CREATE TABLE IF NOT EXISTS " + clazz.getAnnotation(Table.class).name() + "(\n");
+    private void setCreateTableRequestToDB(String ownerTableName) {
+        StringBuilder createRequest = new StringBuilder("CREATE TABLE IF NOT EXISTS " + clazz.getAnnotation(Table.class).value() + "(\n");
 
         // Add id column
         createRequest.append("\tid SERIAL PRIMARY KEY,\n");
 
         // Add other columns
-        for (Field field:
+        for (Field field :
                 clazz.getDeclaredFields()) {
-            Element elementAnnotation = field.getAnnotation(Element.class);
-            ToManyElement toManyElementAnnotation = field.getAnnotation(ToManyElement.class);
-            NotNull notNullAnnotation = field.getAnnotation(NotNull.class);
-            Unique uniqueAnnotation = field.getAnnotation(Unique.class);
-            if (Objects.nonNull(elementAnnotation)) {
+
+            Optional<Element> oneToOneAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(Element.class));
+            Optional<OneToMany> oneToManyAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(OneToMany.class));
+
+            Optional<NoNull> noNullAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(NoNull.class));
+            Optional<Unique> uniqueAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(Unique.class));
+
+            Optional<GreaterThan> greaterThanAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(GreaterThan.class));
+            Optional<LessThan> lessThanAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(LessThan.class));
+            Optional<MaxLength> maxLengthAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(MaxLength.class));
+            Optional<MinLength> minLengthAnnotation = Optional.ofNullable(field.getDeclaredAnnotation(MinLength.class));
+
+            if (oneToOneAnnotation.isPresent()) {
+                String nameOfFieldInDb = oneToOneAnnotation.get().name().equals("") ? field.getName() : oneToOneAnnotation.get().name();
                 if (typeConverter.containsKey(field.getType())) {
                     createRequest
                             .append("\t")
-                            .append(elementAnnotation.name().equals("") ? field.getName() : elementAnnotation.name())
+                            .append(nameOfFieldInDb)
                             .append(" ")
                             .append(typeConverter.get(field.getType()))
-                            .append(Objects.nonNull(notNullAnnotation) ? " NOT NULL" : "")
-                            .append(Objects.nonNull(uniqueAnnotation) ? " UNIQUE" : "")
+                            .append(noNullAnnotation.isPresent() ? " NOT NULL" : "")
+                            .append(uniqueAnnotation.isPresent() ? " UNIQUE" : "")
                             .append(",\n");
+                    createRequest
+                            .append(greaterThanAnnotation.map(greaterThan -> "\tCHECK (" + nameOfFieldInDb + " > " + greaterThan.value() + "),\n").orElse(""));
+                    createRequest
+                            .append(lessThanAnnotation.map(lessThan -> "\tCHECK (" + nameOfFieldInDb + " < " + lessThan.value() + "),\n").orElse(""));
+                } else if (Objects.equals(field.getType(), String.class)) {
+                    createRequest
+                            .append("\t")
+                            .append(nameOfFieldInDb)
+                            .append(" ")
+                            .append(maxLengthAnnotation.map(maxLength -> "VARCHAR(" + maxLength.value() + ")").orElse("TEXT"))
+                            .append(noNullAnnotation.isPresent() ? " NOT NULL" : "")
+                            .append(uniqueAnnotation.isPresent() ? " UNIQUE" : "")
+                            .append(",\n");
+                    createRequest
+                            .append(minLengthAnnotation.map(minLength -> "\tCHECK (LENGTH (" + nameOfFieldInDb + ") >= " + minLength.value() + "),\n").orElse(""));
+                    createRequest
+                            .append(maxLengthAnnotation.map(maxLength -> "\tCHECK (LENGTH (" + nameOfFieldInDb + ") <= " + maxLength.value() + "),\n").orElse(""));
                 } else {
-                    ShadowFiend<?> orm = getORMForClass(field.getType());
-                    orm.getCreateTableRequest(getTableName());
+                    ORM<?> subORM = getORMForClass(field.getType());
+                    subORM.setCreateTableRequestToDB(getTableName());
                 }
             }
-            if (Objects.nonNull(toManyElementAnnotation)) {
+            if (oneToManyAnnotation.isPresent()) {
                 ParameterizedType paraType = (ParameterizedType) field.getGenericType();
                 Class<?> aClass = (Class<?>) paraType.getActualTypeArguments()[0];
-                ShadowFiend<?> orm = getORMForClass(aClass);
-                orm.getCreateTableRequest(getTableName());
+                ORM<?> orm = getORMForClass(aClass);
+                orm.setCreateTableRequestToDB(getTableName());
             }
         }
         if (Objects.nonNull(ownerTableName)) {
             createRequest
                     .append("\t")
-                    .append(ownerTableName + "_id")
+                    .append(ownerTableName)
+                    .append("_id")
                     .append(" INT REFERENCES " )
                     .append(ownerTableName)
                     .append(" (id) ")
                     .append("ON DELETE CASCADE  ");
         }
-
         createRequest.replace(createRequest.length() - 2, createRequest.length() - 1, ");");
-
         createTableRequestToDB = createRequest.toString();
-        iSPrepared = true;
+        System.out.println(createTableRequestToDB);
     }
 
     private String getTableName() {
-        return clazz.getAnnotation(Table.class).name();
+        return clazz.getAnnotation(Table.class).value();
     }
 
-    private <S> ShadowFiend<S> getORMForClass(Class<S> clazz) {
+    private <S> ORM<S> getORMForClass(Class<S> clazz) {
         if (ormInstancesForClasses.containsKey(clazz))
-            return (ShadowFiend<S>) ormInstancesForClasses.get(clazz);
-        ShadowFiend<S> orm = new ShadowFiend<S>(dataSource, clazz);
+            return (ORM<S>) ormInstancesForClasses.get(clazz);
+        ORM<S> orm = new ORM<S>(dataSource, clazz);
         ormInstancesForClasses.put(clazz, orm);
         return orm;
     }
 
-    private static void addInstructionsForType(Class<?> clazz,
-                                               CheckedFunction<String, Object, ConvertInstructionException> function,
-                                               String dbType) {
-        toObjectConvertInstructions.put(clazz, function);
-        typeConverter.put(clazz, dbType);
-    }
-
-    private static CheckedFunction<String, Object, ConvertInstructionException> getWrappedParseNumFunction(Function<String, Object> parseFunction) {
-        return string -> {
-            try {
-                return parseFunction.apply(string);
-            } catch (NumberFormatException e) {
-                throw new ConvertInstructionException();
-            }
-        };
-    }
+    // Static methods
 
     static {
         addInstructionsForType(Integer.class, getWrappedParseNumFunction(Integer::parseInt), Constants.intDB);
@@ -393,7 +365,6 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         addInstructionsForType(Float.class, getWrappedParseNumFunction(Float::parseFloat), Constants.realDB);
         addInstructionsForType(Double.class, getWrappedParseNumFunction(Double::parseDouble), Constants.doubleDB);
         addInstructionsForType(Short.class, getWrappedParseNumFunction(Short::parseShort), Constants.smallIntDB);
-        addInstructionsForType(String.class, string -> string, Constants.textDB);
         addInstructionsForType(Character.class, string -> string.charAt(0), Constants.charDB);
 
         addInstructionsForType(int.class, getWrappedParseNumFunction(Integer::parseInt), Constants.intDB);
@@ -406,6 +377,23 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         addInstructionsForType(char.class, string -> string.charAt(0), Constants.charDB);
     }
 
+    private static CheckedFunction<String, Object, ConvertInstructionException> getWrappedParseNumFunction(Function<String, Object> parseFunction) {
+        return string -> {
+            try {
+                return parseFunction.apply(string);
+            } catch (NumberFormatException e) {
+                throw new ConvertInstructionException();
+            }
+        };
+    }
+
+    private static void addInstructionsForType(Class<?> clazz,
+                                               CheckedFunction<String, Object, ConvertInstructionException> function,
+                                               String dbType) {
+        toObjectConvertInstructions.put(clazz, function);
+        typeConverter.put(clazz, dbType);
+    }
+
     private static final class Constants {
         static String intDB = "INT";
         static String bigIntDB = "BIGINT";
@@ -413,9 +401,6 @@ public class ShadowFiend<T> implements ORMInterface<T> {
         static String smallIntDB = "SMALLINT";
         static String realDB = "REAL";
         static String doubleDB = "DOUBLE";
-        static String textDB = "TEXT";
         static String charDB = "CHARACTER [1]";
-
-        static String id = "id";
     }
 }
