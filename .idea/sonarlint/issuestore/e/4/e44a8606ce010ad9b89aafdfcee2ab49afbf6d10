@@ -5,11 +5,13 @@ F
 java:S1128"+Remove this unused import 'java.util.List'.(Õë±Äøÿÿÿÿ
 C
 java:S1128"-Remove this unused import 'orm.ORMInterface'.(ùÚ‡
-”
-java:S1130"~Remove the declaration of thrown exception 'exceptions.NoTableAnnotationException', as it cannot be thrown from method's body.(·ë¿¾
-
-java:S1130"yRemove the declaration of thrown exception 'java.lang.IllegalAccessException', as it cannot be thrown from method's body.(·ë¿¾
-
-java:S1130"xRemove the declaration of thrown exception 'exceptions.NotPreparedException', as it cannot be thrown from method's body.(·ë¿¾
+›
+java:S1130"~Remove the declaration of thrown exception 'exceptions.NoTableAnnotationException', as it cannot be thrown from method's body.(·ë¿¾8ãúíÿŸ/
+–
+java:S1130"yRemove the declaration of thrown exception 'java.lang.IllegalAccessException', as it cannot be thrown from method's body.(·ë¿¾8ãúíÿŸ/
+•
+java:S1130"xRemove the declaration of thrown exception 'exceptions.NotPreparedException', as it cannot be thrown from method's body.(·ë¿¾8ãúíÿŸ/
 V	java:S125&"<This block of commented-out lines of code should be removed.(¾ÄŒûÿÿÿÿ
-S	java:S106'"9Replace this use of System.out or System.err by a logger.(»Å”ºùÿÿÿÿ
+S	java:S106)"9Replace this use of System.out or System.err by a logger.(¥ÆÖ¤ıÿÿÿÿ
+F
+java:S1481!")Remove this unused "user" local variable.(îö¬¨8“½íÿŸ/

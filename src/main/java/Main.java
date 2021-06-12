@@ -30,13 +30,16 @@ public class Main {
         ArrayList<Car> cars = new ArrayList<>();
         cars.add(new Car(123, "I love HENTAI"));
         cars.add(new Car(133, "I love ANIME"));
-        User user = new User(123789, "o111111111111", cars, new YouTuber("Vlad", new Channel("A4")));
+        User user = new User(123789, "o111111111111", new Car(133, "I love ANIME"), new YouTuber("Vlad", new Channel("A4")));
 
         ORM<User> userORM = new ORM<>(dataSource, User.class);
         userORM.prepare();
         userORM.createTables();
         // userORM.save(user);
-        userORM.getObjects().forEach(System.out::println);
-        userORM.update(user);
+        ArrayList<User> users = new ArrayList<>();
+        users.addAll(userORM.getObjects());
+        users.forEach(System.out::println);
+        users.get(0).login = 78789;
+        userORM.update(users.get(0));
     }
 }

@@ -27,6 +27,7 @@ public class ORM<T> implements ORMInterface<T> {
     // Strings with requests to db
     private String createTableRequestToDB;
     private String insertRequestToDb;
+    private String updateRequestToDb;
 
     public ORM(DataSource dataSource, Class<? super T> clazz) {
         this.dataSource = dataSource;
@@ -74,12 +75,14 @@ public class ORM<T> implements ORMInterface<T> {
 
     @Override
     public boolean update(T object) throws SQLException {
+        updateElement(object);
         return true;
     }
 
     public void prepare() {
         setCreateTableRequestToDB(null);
         setInsertRequestToDb(null);
+        setUpdateRequest();
     }
 
     public void createTables() throws SQLException {
@@ -94,6 +97,41 @@ public class ORM<T> implements ORMInterface<T> {
     }
 
     // Private Methods
+    private void updateElement(Object object) throws SQLException {
+        try (Connection connection = dataSource.getConnection();
+             PreparedStatement preparedStatement = connection.prepareStatement(updateRequestToDb)) {
+            Integer id = null;
+            int counter = 0;
+            for (Field field:
+                 clazz.getDeclaredFields()) {
+                field.setAccessible(true);
+
+                Element elementAnnotation = field.getAnnotation(Element.class);
+                Id idAnnotation = field.getAnnotation(Id.class);
+
+
+                if (Objects.nonNull(elementAnnotation)) {
+                    if (typeConverter.containsKey(field.getType()) || String.class.equals(field.getType())) {
+                        preparedStatement.setObject(++counter, field.get(object));
+                        System.out.print(counter + " " + clazz.getName() + " ");
+                        System.out.println(field.getName());
+                    } else {
+                        ORM<?> subOrm = getORMForClass(field.getType());
+                        subOrm.updateElement(field.get(object));
+                    }
+                } else if (Objects.nonNull(idAnnotation)) {
+                    id = (Integer) field.get(object);
+                }
+                field.setAccessible(false);
+            }
+            System.out.println(preparedStatement);
+            preparedStatement.setInt(++counter, id);
+            preparedStatement.execute();
+        } catch (IllegalAccessException e) {
+            e.printStackTrace();
+        }
+    }
+
     private void deleteFromDB(Object o) throws SQLException, IllegalAccessException {
         try (Connection connection = dataSource.getConnection();
              Statement statement = connection.createStatement()) {
@@ -217,8 +255,30 @@ public class ORM<T> implements ORMInterface<T> {
         }
     }
 
-
     // Methods for creating requests
+    private void setUpdateRequest() {
+        StringBuilder updateRequest = new StringBuilder("UPDATE " + getTableName() + " SET ");
+
+        for (Field field:
+                clazz.getDeclaredFields()) {
+            Optional<Element> elementAnnotation = Optional.ofNullable(field.getAnnotation(Element.class));
+
+            if (elementAnnotation.isPresent()) {
+                if (typeConverter.containsKey(field.getType()) || String.class.equals(field.getType())) {
+                    updateRequest
+                            .append(elementAnnotation.get().name().equals("") ? field.getName() : elementAnnotation.get().name())
+                            .append(" = ?, ");
+                }
+            }
+        }
+
+        updateRequest.replace(updateRequest.length() - 2, updateRequest.length() - 1, " WHERE id = ?;");
+        updateRequestToDb = updateRequest.toString();
+        System.out.println(updateRequestToDb);
+
+        ormInstancesForClasses.values().forEach(ORM::setUpdateRequest);
+    }
+
     private void setInsertRequestToDb(String ownerTable) {
         StringBuilder insertRequest = new StringBuilder("INSERT INTO " + getTableName() +" (");
 
@@ -238,7 +298,7 @@ public class ORM<T> implements ORMInterface<T> {
                 if (typeConverter.containsKey(field.getType()) || String.class.equals(field.getType())) {
                     countOfColumns++;
                     insertRequest
-                            .append(field.getName())
+                            .append(elementAnnotation.get().name().equals("") ? field.getName() : elementAnnotation.get().name())
                             .append(", ");
                 } else {
                     ORM<?> orm = getORMForClass(field.getType());

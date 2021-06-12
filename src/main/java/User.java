@@ -13,15 +13,15 @@ public class User {
     int id;
     @Element
     int login;
-    @OneToMany
-    ArrayList<Car> cars;
+    @Element
+    Car cars;
     @Element
     @MaxLength(15)
     @MinLength(11)
     String password;
     @Element
     YouTuber youTuber;
-    public User(int login, String password, ArrayList<Car> cars, YouTuber youTuber) {
+    public User(int login, String password, Car cars, YouTuber youTuber) {
         this.login = login;
         this.password = password;
         this.cars = cars;
